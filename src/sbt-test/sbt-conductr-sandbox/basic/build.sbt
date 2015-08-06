@@ -1,4 +1,5 @@
 import org.scalatest.Matchers._
+import ByteConversions._
 
 lazy val root = (project in file(".")).enablePlugins(ConductRSandbox)
 

@@ -1,5 +1,6 @@
 package com.typesafe.sbt.conductrsandbox
 
+import com.typesafe.sbt.packager.universal.UniversalPlugin
 import com.typesafe.sbt.bundle.Import.BundleKeys
 import sbt._
 import sbt.Keys._
@@ -23,6 +24,11 @@ object Import {
     val ports = SettingKey[Set[Int]](
       "conductr-sandbox-ports",
       "A sequence of ports to be made public by each of the ConductR containers. This will be complemented to the `endpoints` setting's service ports declared for `sbt-bundle`."
+    )
+
+    val debugPort = SettingKey[Int](
+      "conductr-sandbox-debugPort",
+      "The debug port to be made public by each of the ConductR containers."
     )
 
     val logLevel = SettingKey[String](
@@ -54,8 +60,10 @@ object ConductRSandbox extends AutoPlugin {
 
   val autoImport = Import
 
+  //  override def `requires`: Plugins = UniversalPlugin
+
   override def globalSettings: Seq[Setting[_]] =
-    super.globalSettings ++ List(
+    super.globalSettings ++ Seq(
       envs := Map.empty,
       image := ConductRDevImage,
       ports := Set.empty,
@@ -64,9 +72,11 @@ object ConductRSandbox extends AutoPlugin {
 
       runConductRs := runConductRsTask(ScopeFilter(inAnyProject, inAnyConfiguration)).value,
       stopConductRs := stopConductRsTask().value,
-
       commands ++= Seq(sandboxControlServer)
     )
+
+  override def projectSettings: Seq[Setting[_]] =
+    super.projectSettings ++ debugSettings.value
 
   private final val ConductRDevImage = "conductr/conductr-dev"
 
@@ -109,7 +119,8 @@ object ConductRSandbox extends AutoPlugin {
       val container = s"$ConductrNamePrefix$i"
       val containers = s"docker ps -q -f name=$container".!!
       if (containers.isEmpty) {
-        val portsDesc = (ports in Global).value.map(port => s"$dockerHostIp:${portMapping(i, port)}").mkString(", ")
+        val allPorts = (ports in Global).value + (debugPort in Global).value ++ bundlePorts
+        val portsDesc = allPorts.map(port => s"$dockerHostIp:${portMapping(i, port)}").mkString(", ")
         streams.value.log.info(s"Running container $container exposing $portsDesc...")
         val cond0Ip = if (i > 0) Some(inspectCond0Ip()) else None
         runConductRCmd(
@@ -119,7 +130,8 @@ object ConductRSandbox extends AutoPlugin {
           (envs in Global).value,
           (image in Global).value,
           (logLevel in Global).value,
-          (ports in Global).value ++ bundlePorts).!(streams.value.log)
+          allPorts
+        ).!(streams.value.log)
       } else
         streams.value.log.warn(s"Container $container already exists, leaving it alone")
     }
@@ -175,5 +187,19 @@ object ConductRSandbox extends AutoPlugin {
       val containersArg = containers.mkString(" ")
       s"docker rm -f $containersArg".!(streams.value.log)
     }
+  }
+
+  private def debugSettings: Def.Initialize[Seq[Setting[_]]] = Def.setting {
+    BundleKeys.startCommand.?.map(_.fold[Def.Initialize[Seq[Setting[_]]]](SettingKey[_]("", "")) {
+      //      case None =>
+      //        Seq.empty
+      case startArgs =>
+        Seq(
+          debugPort := 5005,
+          BundleKeys.startCommand := startArgs :+ s"-jvm-debug ${debugPort.value}"
+        )
+    })
+    //    Project.extract(state.value).getOpt(BundleKeys.startCommand) match {
+
   }
 }

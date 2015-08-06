@@ -1,0 +1,9 @@
+> conductr-sandbox-run
+
+> checkPorts
+
+> bundle:dist
+
+> checkDebugJVMArgument
+
+> conductr-sandbox-stop
