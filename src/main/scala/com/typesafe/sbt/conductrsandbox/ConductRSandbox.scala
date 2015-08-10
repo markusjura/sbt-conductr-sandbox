@@ -1,6 +1,5 @@
 package com.typesafe.sbt.conductrsandbox
 
-import com.typesafe.sbt.packager.universal.UniversalPlugin
 import com.typesafe.sbt.bundle.Import.BundleKeys
 import sbt._
 import sbt.Keys._
@@ -60,8 +59,6 @@ object ConductRSandbox extends AutoPlugin {
 
   val autoImport = Import
 
-  //  override def `requires`: Plugins = UniversalPlugin
-
   override def globalSettings: Seq[Setting[_]] =
     super.globalSettings ++ Seq(
       envs := Map.empty,
@@ -72,11 +69,13 @@ object ConductRSandbox extends AutoPlugin {
 
       runConductRs := runConductRsTask(ScopeFilter(inAnyProject, inAnyConfiguration)).value,
       stopConductRs := stopConductRsTask().value,
-      commands ++= Seq(sandboxControlServer)
+      commands ++= Seq(sandboxControlServer, debugSandboxBundle)
     )
 
   override def projectSettings: Seq[Setting[_]] =
-    super.projectSettings ++ debugSettings.value
+    super.projectSettings ++ Seq(
+      debugPort := 5005
+    )
 
   private final val ConductRDevImage = "conductr/conductr-dev"
 
@@ -180,6 +179,22 @@ object ConductRSandbox extends AutoPlugin {
     Command.process(s"controlServer http://${resolveDockerHostIp()}:$ConductrPort", prevState)
   }
 
+  private def debugSandboxBundle: Command = Command.command("debugSandboxBundle") { prevState =>
+    val extracted = Project.extract(prevState)
+    extracted
+      .getOpt(BundleKeys.startCommand)
+      .map { existingStartCommand =>
+        prevState.log.info("Debugging enabled upon loading and running your bundle")
+        extracted.append(Seq(
+          BundleKeys.startCommand := (existingStartCommand :+ s"-jvm-debug ${extracted.get(debugPort)}").distinct
+        ), prevState)
+      }
+      .getOrElse {
+        prevState.log.info("There is no bundle for this project and so it cannot be debugged")
+        prevState
+      }
+  }
+
   private def stopConductRsTask(): Def.Initialize[Task[Unit]] = Def.task {
     val containers = s"docker ps -q -f name=$ConductrNamePrefix".lines_!
     if (containers.nonEmpty) {
@@ -187,19 +202,5 @@ object ConductRSandbox extends AutoPlugin {
       val containersArg = containers.mkString(" ")
       s"docker rm -f $containersArg".!(streams.value.log)
     }
-  }
-
-  private def debugSettings: Def.Initialize[Seq[Setting[_]]] = Def.setting {
-    BundleKeys.startCommand.?.map(_.fold[Def.Initialize[Seq[Setting[_]]]](SettingKey[_]("", "")) {
-      //      case None =>
-      //        Seq.empty
-      case startArgs =>
-        Seq(
-          debugPort := 5005,
-          BundleKeys.startCommand := startArgs :+ s"-jvm-debug ${debugPort.value}"
-        )
-    })
-    //    Project.extract(state.value).getOpt(BundleKeys.startCommand) match {
-
   }
 }
